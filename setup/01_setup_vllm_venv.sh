@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# ---------------------------------------------------------------------------
+# vllm_venv : serving the verifier (for hidden-state extraction) and running
+#             baseline / speculative / quantized / combined benchmarks
+# ---------------------------------------------------------------------------
+set -euo pipefail
+
+PY=python3.12
+
+$PY -m venv vllm_venv
+source vllm_venv/bin/activate
+pip install --upgrade pip uv
+
+# Pinned per assignment spec
+uv pip install "vllm==0.20.0"
+uv pip install "fastapi<0.137"
+
+echo "vllm_venv ready. Activate with: source vllm_venv/bin/activate"
+echo "Sanity check:"
+python -c "import vllm, fastapi; print('vllm', vllm.__version__, '| fastapi', fastapi.__version__)"

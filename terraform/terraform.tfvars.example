@@ -1,0 +1,30 @@
+# Copy to terraform.tfvars and fill in IDs from the Nebius console / CLI.
+# Project example: default-project-eu-north1 → use the project-* ID from:
+#   nebius project list
+# Subnet ID from:
+#   nebius vpc subnet list --parent-id <project_id>
+
+region        = "eu-north1"
+project_id    = "project-XXXXXXXXXXXXXXXX"
+subnet_id     = "subnet-XXXXXXXXXXXXXXXX"   # required (subnet_name alone is not enough for the API)
+subnet_name   = "default-subnet"            # your reference label from the console
+
+instance_name = "mlops-assignment-h100"
+
+# Assignment target: 1× NVIDIA H100 80GB (Qwen3-30B-A3B)
+gpu_platform = "gpu-h100-sxm"
+gpu_preset   = "1gpu-16vcpu-200gb"
+
+# Ubuntu 24.04 + CUDA 13; 256 GiB is plenty for model + data (1280 also fine)
+boot_disk_size_gib       = 256
+boot_disk_image_family   = "ubuntu24.04-cuda13.0"
+
+# VM login user (Nebius Ubuntu images typically use "ubuntu")
+ssh_username = "ubuntu"
+key_name     = "nebius-h100"
+
+# Paste your public key (one line, e.g. contents of ~/.ssh/id_ed25519.pub)
+ssh_public_key = ""
+
+# Optional: clone assignment repo on first boot
+repo_url = ""
