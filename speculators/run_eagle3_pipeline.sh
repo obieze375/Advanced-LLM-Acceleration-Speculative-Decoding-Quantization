@@ -7,18 +7,24 @@
 # ===========================================================================
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+UPSTREAM="${REPO_ROOT}/speculators-upstream"
+
 MODEL="Qwen/Qwen3-8B"
-OUT="./output"
+OUT="${UPSTREAM}/output"
 HS_OUT="${OUT}/hidden_states"
 CKPT_OUT="${OUT}/checkpoints"
 PORT=8000
+
+cd "${UPSTREAM}"
 
 # ---------------------------------------------------------------------------
 # Step 1: Prepare data (speculators_venv)
 #   ShareGPT-style conversations, as required by the assignment.
 # ---------------------------------------------------------------------------
 prepare_data () {
-  source ../speculators_venv/bin/activate
+  source "${REPO_ROOT}/speculators_venv/bin/activate"
   python scripts/prepare_data.py \
     --model "${MODEL}" \
     --data sharegpt \
@@ -34,7 +40,7 @@ prepare_data () {
 #   not carry FP8 quantization noise (see REPORT.md, Section 3).
 # ---------------------------------------------------------------------------
 launch_verifier () {
-  source ../vllm_venv/bin/activate
+  source "${REPO_ROOT}/vllm_venv/bin/activate"
   CUDA_VISIBLE_DEVICES=0 python scripts/launch_vllm.py \
     "${MODEL}" \
     -- --port "${PORT}" --gpu-memory-utilization 0.85
@@ -46,7 +52,7 @@ launch_verifier () {
 # Step 3: Generate hidden states offline (speculators_venv)
 # ---------------------------------------------------------------------------
 generate_hidden_states () {
-  source ../speculators_venv/bin/activate
+  source "${REPO_ROOT}/speculators_venv/bin/activate"
   python scripts/data_generation_offline.py \
     --preprocessed-data "${OUT}" \
     --endpoint "http://localhost:${PORT}/v1" \
@@ -66,7 +72,7 @@ generate_hidden_states () {
 #   (speculators_venv). Single H100 -> single-GPU training path.
 # ---------------------------------------------------------------------------
 train_draft_head () {
-  source ../speculators_venv/bin/activate
+  source "${REPO_ROOT}/speculators_venv/bin/activate"
   python scripts/train.py \
     --verifier-name-or-path "${MODEL}" \
     --data-path "${OUT}" \
@@ -84,7 +90,7 @@ train_draft_head () {
 #   FULL-PRECISION verifier before moving to quantization.
 # ---------------------------------------------------------------------------
 smoke_test () {
-  source ../vllm_venv/bin/activate
+  source "${REPO_ROOT}/vllm_venv/bin/activate"
   echo "Checkpoints:"
   ls -1 "${CKPT_OUT}"
   echo "Serve with: vllm serve ${CKPT_OUT}/checkpoint_best --port ${PORT}"
