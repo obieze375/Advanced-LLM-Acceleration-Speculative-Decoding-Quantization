@@ -1,0 +1,46 @@
+# Virtual environments (assignment: do not submit)
+*_venv/
+comp_venv/
+.venv/
+venv/
+
+# Large training artifacts
+**/hidden_states/
+**/sharegpt_raw/
+**/*.safetensors
+**/*.bin
+**/*.pt
+**/*.pth
+**/*.ckpt
+
+# Upstream clone — keep only small metadata (see git add commands in README)
+speculators-upstream/output/hidden_states/
+speculators-upstream/output/checkpoints/**/model*.safetensors
+speculators-upstream/output/checkpoints/**/pytorch_model*
+speculators-upstream/output/preprocessed*/
+speculators-upstream/.git/
+
+# FP8 checkpoint weights (submit config/recipe only unless course requires weights)
+quantization/Qwen3-8B-FP8-Dynamic/*.safetensors
+quantization/Qwen3-8B-FP8-Dynamic/model*.safetensors
+
+# Symlinks / accidental nested copies under speculators/
+speculators/*_venv
+speculators/comp_venv
+speculators/speculators-upstream
+speculators/speculators_venv
+speculators/vllm_venv
+setup/speculators/
+
+# Python / OS noise
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.DS_Store
+*.swp
+wandb/
+
+# Terraform secrets (never commit)
+terraform/terraform.tfvars
+terraform/.terraform/
+terraform/*.tfstate*
