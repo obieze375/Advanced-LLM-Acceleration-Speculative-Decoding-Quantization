@@ -35,6 +35,14 @@ DRAFT_CKPT = "../speculators-upstream/output/checkpoints/checkpoint_best"
 PROMPTS_FILE = "bench_prompts.jsonl"   # one {"prompt": "..."} per line, ShareGPT-derived
 NUM_PROMPTS = 256
 MAX_NEW_TOKENS = 512
+NUM_SPECULATIVE_TOKENS = 3
+
+SPEC_DECODE_CONFIG = {
+    "method": "eagle3",
+    "model": DRAFT_CKPT,
+    "num_speculative_tokens": NUM_SPECULATIVE_TOKENS,
+    "draft_tensor_parallel_size": 1,
+}
 
 
 def load_prompts(n=NUM_PROMPTS):
@@ -56,10 +64,7 @@ def build_llm(config: str) -> LLM:
     if config == "spec_decode":
         return LLM(
             model=VERIFIER_BF16,
-            speculative_config={
-                "model": DRAFT_CKPT,
-                "num_speculative_tokens": 5,
-            },
+            speculative_config=SPEC_DECODE_CONFIG,
             **kwargs,
         )
 
@@ -69,10 +74,7 @@ def build_llm(config: str) -> LLM:
     if config == "spec_decode_fp8":
         return LLM(
             model=VERIFIER_FP8,
-            speculative_config={
-                "model": DRAFT_CKPT,
-                "num_speculative_tokens": 5,
-            },
+            speculative_config=SPEC_DECODE_CONFIG,
             **kwargs,
         )
 
