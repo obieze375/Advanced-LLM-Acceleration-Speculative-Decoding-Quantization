@@ -16,6 +16,8 @@ OUT="${UPSTREAM}/output"
 HS_OUT="${OUT}/hidden_states"
 CKPT_OUT="${OUT}/checkpoints"
 PORT=8000
+MAX_SAMPLES=3000
+SEQ_LENGTH=2048
 
 cd "${UPSTREAM}"
 
@@ -29,8 +31,8 @@ prepare_data () {
     --model "${MODEL}" \
     --data sharegpt \
     --output "${OUT}" \
-    --max-samples 20000 \
-    --seq-length 8192
+    --max-samples "${MAX_SAMPLES}" \
+    --seq-length "${SEQ_LENGTH}"
 }
 
 # ---------------------------------------------------------------------------
@@ -57,8 +59,9 @@ generate_hidden_states () {
     --preprocessed-data "${OUT}" \
     --endpoint "http://localhost:${PORT}/v1" \
     --output "${HS_OUT}" \
-    --max-samples 20000 \
-    --concurrency 32 \
+    --max-samples "${MAX_SAMPLES}" \
+    --concurrency 8 \
+    --request-timeout 60 \
     --validate-outputs
 }
 
@@ -81,7 +84,7 @@ train_draft_head () {
     --draft-vocab-size 32000 \
     --epochs 5 \
     --lr 1e-4 \
-    --total-seq-len 8192 \
+    --total-seq-len "${SEQ_LENGTH}" \
     --on-missing raise
 }
 
