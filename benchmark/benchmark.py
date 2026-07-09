@@ -29,8 +29,8 @@ import torch
 from vllm import LLM, SamplingParams
 
 VERIFIER_BF16 = "Qwen/Qwen3-8B"
-VERIFIER_FP8 = "./Qwen3-8B-FP8-Dynamic"          # produced by quantization/quantize_fp8.py
-DRAFT_CKPT = "./output/checkpoints/checkpoint_best"  # produced by EAGLE-3 training
+VERIFIER_FP8 = "../quantization/Qwen3-8B-FP8-Dynamic"
+DRAFT_CKPT = "../speculators-upstream/output/checkpoints/checkpoint_best"
 
 PROMPTS_FILE = "bench_prompts.jsonl"   # one {"prompt": "..."} per line, ShareGPT-derived
 NUM_PROMPTS = 256
