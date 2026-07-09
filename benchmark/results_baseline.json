@@ -1,0 +1,10 @@
+[
+  {
+    "config": "baseline",
+    "num_prompts": 256,
+    "total_output_tokens": 130937,
+    "wall_time_s": 8.81765846900089,
+    "throughput_tok_per_s": 14849.407068817465,
+    "peak_mem_gb": 0.0
+  }
+]

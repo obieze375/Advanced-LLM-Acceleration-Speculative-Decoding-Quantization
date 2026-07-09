@@ -1,0 +1,11 @@
+[
+  {
+    "config": "spec_decode",
+    "num_prompts": 256,
+    "total_output_tokens": 130844,
+    "wall_time_s": 18.178113560003112,
+    "throughput_tok_per_s": 7197.886599624565,
+    "peak_mem_gb": 0.0,
+    "draft_acceptance_rate": "unavailable: Stat logging disabled"
+  }
+]

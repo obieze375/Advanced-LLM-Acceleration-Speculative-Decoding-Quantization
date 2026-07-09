@@ -1,0 +1,10 @@
+[
+  {
+    "config": "fp8",
+    "num_prompts": 256,
+    "total_output_tokens": 130336,
+    "wall_time_s": 7.758409900001425,
+    "throughput_tok_per_s": 16799.318633574137,
+    "peak_mem_gb": 0.0
+  }
+]
