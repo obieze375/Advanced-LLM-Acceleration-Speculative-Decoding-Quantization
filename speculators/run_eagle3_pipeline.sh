@@ -85,6 +85,9 @@ train_draft_head () {
     --epochs 5 \
     --lr 1e-4 \
     --total-seq-len "${SEQ_LENGTH}" \
+    --save-best \
+    --logger wandb,tensorboard \
+    --log-dir "${UPSTREAM}/logs" \
     --on-missing raise
 }
 
