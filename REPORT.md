@@ -32,6 +32,70 @@ All scripts are in this bundle (`setup/`, `speculators/`, `quantization/`, `benc
 - Draft checkpoint: `speculators-upstream/output/checkpoints/checkpoint_best`
 - FP8 verifier: `quantization/Qwen3-8B-FP8-Dynamic/`
 
+### Task 1 — Why hidden states use much more disk than text
+
+The ShareGPT source stores compact token IDs or UTF-8 strings (roughly a few bytes per token). Hidden-state caches store **bf16/fp16 activation tensors for every token position** across the verifier layers EAGLE-3 needs — typically tens of MB per sample for Qwen3-8B. Storage scales as `samples × seq_len × hidden_dim × layers_stored`, so 3,000 samples at seq 2048 lands around **~140 GB**, vs **~100 MB** for the text side. That is why reducing `max-samples` is the first lever when disk fills up.
+
+### Task 2 — EAGLE-3 draft-head training
+
+**Completed work:**
+- Verifier: `Qwen/Qwen3-8B` (bf16)
+- Training: `train_draft_head` on cached hidden states, 5 epochs, lr 1e-4, `--save-best`
+- Checkpoints: `speculators-upstream/output/checkpoints/` → `checkpoint_best` used for benchmarking
+- Metrics: TensorBoard / `val_metrics.json` — per-position `full_acc`, `cond_acc`, and `loss_k`
+
+**Reference validation metrics (epoch 4 = 5th epoch):**
+
+| Metric | Value | Draft position |
+|---|---:|---|
+| `val/loss_0_epoch` | 2.509 | 0 (first speculative token) |
+| `val/full_acc_0_epoch` | 0.463 | 0 |
+| `val/cond_acc_0_epoch` | 0.463 | 0 |
+| `val/loss_1_epoch` | 3.778 | 1 |
+| `val/full_acc_1_epoch` | 0.181 | 1 |
+| `val/cond_acc_1_epoch` | 0.364 | 1 |
+| `val/loss_2_epoch` | 4.550 | 2 |
+| `val/full_acc_2_epoch` | 0.069 | 2 |
+| `val/cond_acc_2_epoch` | 0.320 | 2 |
+| `val/loss_epoch` | 10.837 | total (all positions) |
+
+**Reading the table:** Position-0 accuracy is moderate (~46%). Later positions fall sharply in `full_acc` (18% → 7%) while `cond_acc` stays higher (36% → 32%), which is the expected error-compounding pattern. The aggregate `val/loss_epoch` is dominated by harder later positions — do not use it alone to judge draft quality.
+
+#### Q1. What do `full_acc` and `cond_acc` measure?
+
+- **`full_acc` (full / unconditional accuracy)** at draft position *k* is the fraction of validation examples where the draft model's predicted token at step *k* matches the verifier's (teacher) token at that step, evaluated under the **training-time test** rollout — i.e., the draft is fed its own prior predictions as inputs when generating later positions, mirroring real speculative decoding. This is the realistic end-to-end match rate at each depth in the speculative chain.
+
+- **`cond_acc` (conditional accuracy)** at position *k* is the same match rate, but computed **only on examples where all earlier draft positions (0 … k−1) already matched the teacher**. It answers: "If the speculative chain has been perfect so far, how often does the draft get the next token right?"
+
+At position 0 the two metrics coincide (no prior positions). For *k* ≥ 1, `cond_acc` ≥ `full_acc` because `full_acc` is reduced by cases where an early mistake already put the draft on the wrong trajectory.
+
+These metrics proxy the runtime **draft acceptance rate** per speculative step: higher `full_acc` → more tokens accepted per verifier forward pass → better speculative-decoding speedup.
+
+#### Q2. Why does accuracy usually decrease for later speculative positions?
+
+1. **Error compounding (training-time test).** After position 0, each later prediction is conditioned on the draft's own previous outputs, not the verifier's ground-truth tokens. A wrong early token shifts the hidden-state context, so the draft drifts further from the teacher distribution at each step. `full_acc` drops fastest for this reason (0.463 → 0.181 → 0.069 in the reference run).
+
+2. **Increasing prediction horizon.** Position *k* asks the draft to predict the (*k*+1)-th token ahead using features that were originally aligned to shorter horizons. Distant tokens are inherently harder to guess from cached verifier features.
+
+3. **Loss weighting across positions.** Per-position loss rises (`loss_0` 2.5 → `loss_1` 3.8 → `loss_2` 4.6), so the total `val/loss_epoch` (10.8) is dominated by later, harder steps — another reason to inspect position-wise metrics instead of aggregate loss alone.
+
+`cond_acc` also declines (0.463 → 0.364 → 0.320) but more slowly than `full_acc`, confirming that even on "good" prefixes the draft's multi-step predictions degrade with depth.
+
+#### Q3. What would you change if first-position accuracy is very low?
+
+**Fix data generation first — not the training recipe.** Position-0 `full_acc` is measured before any draft error accumulation, so a very low value means the draft is not even matching the teacher on the first speculative step. That usually indicates bad training labels (hidden states / targets), not a bad learning rate.
+
+Concrete checks, in order:
+
+1. **Verifier server during hidden-state capture** — confirm `launch_verifier` finished startup, serves `Qwen/Qwen3-8B` in bf16, and exposes hidden states via `launch_vllm.py`.
+2. **vLLM version** — must match the training stack (vLLM 0.20.0 here); version mismatches cause sequence-length / hidden-state shape bugs.
+3. **Sequence-length alignment** — tokenized length in preprocessed data must match hidden-state sequence length; rerun generation if they diverge.
+4. **Stale temp files** — clear `/tmp/hidden_states/*` and regenerate if generation reports missing partial files.
+5. **Completeness** — rerun `generate_hidden_states` with `--validate-outputs` and `--on-missing raise` so no corrupt or missing samples enter training.
+6. **Only after data is verified** — increase `max-samples` (most impactful for draft quality), then consider lr / epochs / `draft_vocab_size`.
+
+In our run, position-0 accuracy (~46%) was not catastrophically low, but the benchmark still showed spec_decode slower than baseline — consistent with weak multi-step acceptance. More training data (beyond 3,000 samples) would be the next improvement, not hyperparameter tuning.
+
 ## 2. Answer: which goes first?
 
 **Train the EAGLE-3 draft head first, against the full-precision (bf16) verifier. Quantize with FP8 second.**
@@ -79,15 +143,7 @@ Run: `python benchmark/benchmark.py --config all --out results_all.json`
 
 **Ordering validation.** Training EAGLE-3 on bf16 hidden states before FP8 quantization was still the correct engineering choice: output correctness is preserved, the draft checkpoint is reusable, and the ablation grid cleanly isolates each optimization's contribution. A higher-quality draft (more training data, longer sequences, or more epochs) would be needed before speculative decoding could outperform FP8 quantization on this hardware.
 
-### Supplemental notes (EAGLE-3 training & FP8)
-
-**EAGLE-3 accuracy metrics (TensorBoard / validation logs):**
-- `full_acc` — fraction of draft positions where the draft token matches the teacher (verifier) argmax at that position.
-- `cond_acc` — same match rate *conditioned on* all prior positions in the speculative chain already matching the teacher.
-- Later positions in the chain are harder because errors compound: a wrong early token shifts the hidden-state context for subsequent predictions.
-- If first-position accuracy is low, the root cause is usually **data generation** (hidden states captured from a misconfigured or under-served verifier), not training hyperparameters — fix the upstream pipeline before tuning lr/epochs.
-
-**FP8 quantization choices:**
+### Supplemental notes (FP8)
 - FP8 dynamic PTQ is useful on H100 because the chip has native FP8 tensor cores; weights and activations are quantized on-the-fly, yielding throughput and memory savings without a separate calibration dataset pass.
 - `lm_head` is typically excluded from quantization because it is small relative to the transformer stack but disproportionately affects output-token distribution fidelity.
 - Quantization can lower draft acceptance if the FP8 verifier's argmax occasionally disagrees with the bf16 verifier the draft was trained against; in this run, spec_decode was already slower than baseline on bf16, so any FP8-induced acceptance drop is secondary to overall draft quality.
