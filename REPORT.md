@@ -96,6 +96,69 @@ Concrete checks, in order:
 
 In our run, position-0 accuracy (~46%) was not catastrophically low, but the benchmark still showed spec_decode slower than baseline — consistent with weak multi-step acceptance. More training data (beyond 3,000 samples) would be the next improvement, not hyperparameter tuning.
 
+### Task 3 — FP8 dynamic quantization
+
+**Completed work:**
+- Tool: `llmcompressor==0.12.0` in `comp_venv`, `oneshot()` + `QuantizationModifier`
+- Scheme: `FP8_DYNAMIC` on all `Linear` layers, `ignore=["lm_head"]`
+- Saved to: `quantization/Qwen3-8B-FP8-Dynamic/` (original `Qwen/Qwen3-8B` unchanged on Hugging Face / local cache)
+- Verified: `config.json` contains a `quantization_config` section before benchmarking
+
+**Command:**
+```bash
+cd quantization
+source ../comp_venv/bin/activate
+python quantize_fp8.py
+```
+
+**Expected quantization properties (verified in saved `config.json` / `recipe.yaml`):**
+
+| Property | Expected value |
+|---|---|
+| Quantization method | compressed tensors |
+| Weight format | FP8 |
+| Activation format | dynamic FP8 |
+| Target modules | linear layers (`Linear`) |
+| Ignored module | `lm_head` |
+
+**Benchmark impact (Section 4):** `fp8` alone reached **16,799 tok/s** vs **14,849 tok/s** baseline (+13%). `spec_decode_fp8` (8,263 tok/s) beat `spec_decode` (7,198 tok/s) on throughput, but both spec configs remained slower than baseline due to weak draft acceptance — not because FP8 quantization failed.
+
+#### Q1. Why is FP8 dynamic quantization useful for serving on H100?
+
+1. **Native FP8 hardware.** H100 Tensor Cores support FP8 matrix math (E4M3 / E5M2). Quantized linear layers run on these units instead of wider bf16/fp16 paths, improving compute throughput on matmul-bound decoder layers.
+
+2. **Lower memory bandwidth.** FP8 weights are half the size of bf16 weights. For an 8B model, loading layers from GPU memory is often bandwidth-limited; smaller weights mean faster loads and more tokens/sec — matching our benchmark (+13% throughput for `fp8` vs `baseline`).
+
+3. **Dynamic activations without calibration.** `FP8_DYNAMIC` uses static per-channel weight scales and **per-token dynamic activation quantization**. No calibration dataset or extra forward passes are required (pure PTQ via `llmcompressor oneshot`), so quantization is cheap and reproducible.
+
+4. **Serving stack support.** vLLM and compressed-tensors integrate FP8 checkpoints directly, so the quantized verifier drops into the same serving path as bf16 with no retraining.
+
+#### Q2. Why might `lm_head` be excluded from quantization?
+
+The language-model head maps the final hidden state (`hidden_dim` → `vocab_size`) to logits over the full vocabulary. It is excluded because:
+
+1. **Disproportionate impact on outputs.** The head is the last step before argmax/sampling. Small numerical errors in logits can change the top-1 token, affecting perplexity and generation quality far more than the same error in an intermediate layer.
+
+2. **Small memory footprint.** `lm_head` is one linear layer versus dozens in the transformer stack. Keeping it in bf16 costs little extra memory but preserves full-precision token scores.
+
+3. **Standard PTQ practice.** The llm-compressor FP8 reference recipe ignores `lm_head` for this reason; our `quantize_fp8.py` follows the same pattern (`ignore=["lm_head"]`).
+
+Quantizing the body captures most of the FLOPs and weight memory savings; leaving the head full precision is a good accuracy/performance tradeoff.
+
+#### Q3. How can quantization affect speculative decoding acceptance rate?
+
+Speculative decoding accepts a draft token only when it **matches the verifier's argmax** at that step. Quantization affects acceptance through **distribution mismatch**, not correctness:
+
+1. **Draft trained on bf16, verifier served as FP8.** The EAGLE-3 draft was trained against bf16 hidden states and bf16 teacher tokens. An FP8 verifier can produce slightly different activations and argmax tokens. When the FP8 verifier's argmax differs from the draft proposal — even if both would be "close" in probability — the draft token is **rejected** and the speculative chain shortens.
+
+2. **Acceptance rate drops, outputs stay correct.** The verifier forward pass is always ground truth at inference; quantization changes how often the draft *guesses* the verifier's token, not the final generated text (under greedy decoding). Lower acceptance → more verifier steps → less speedup from speculation.
+
+3. **Compounding over speculative depth.** A mismatch at an early position forces a resample; later draft tokens in that chain are wasted. Even a small per-step disagreement rate (e.g., 1–2% argmax flip rate) materially reduces multi-token acceptance.
+
+4. **Empirical read from our benchmark.** `spec_decode_fp8` (8,263 tok/s) improved over `spec_decode` (7,198 tok/s) because the FP8 verifier is faster per forward pass — but both remained well below baseline and `fp8` alone, indicating draft quality dominated. In a stronger draft setup, the relevant comparison would be acceptance rate / throughput of `spec_decode` (bf16 verifier) vs `spec_decode_fp8` (FP8 verifier); a measurable gap there would isolate the precision-mismatch effect described above.
+
+**Mitigation:** Train the draft on bf16 (as we did), use dynamic FP8 (tracks activations better than static), exclude `lm_head`, and compare acceptance metrics across bf16 vs FP8 verifier rows in the benchmark grid.
+
 ## 2. Answer: which goes first?
 
 **Train the EAGLE-3 draft head first, against the full-precision (bf16) verifier. Quantize with FP8 second.**
@@ -142,11 +205,6 @@ Run: `python benchmark/benchmark.py --config all --out results_all.json`
 **Combined config is better than spec_decode alone but still below fp8 alone.** `spec_decode_fp8` (8,263 tok/s) improves on `spec_decode` (7,198 tok/s) — FP8's faster verifier partially offsets the speculative-decoding overhead — but remains well below `fp8` without speculation (16,799 tok/s). The two optimizations do not compose additively here; the bottleneck is draft quality, not verifier precision.
 
 **Ordering validation.** Training EAGLE-3 on bf16 hidden states before FP8 quantization was still the correct engineering choice: output correctness is preserved, the draft checkpoint is reusable, and the ablation grid cleanly isolates each optimization's contribution. A higher-quality draft (more training data, longer sequences, or more epochs) would be needed before speculative decoding could outperform FP8 quantization on this hardware.
-
-### Supplemental notes (FP8)
-- FP8 dynamic PTQ is useful on H100 because the chip has native FP8 tensor cores; weights and activations are quantized on-the-fly, yielding throughput and memory savings without a separate calibration dataset pass.
-- `lm_head` is typically excluded from quantization because it is small relative to the transformer stack but disproportionately affects output-token distribution fidelity.
-- Quantization can lower draft acceptance if the FP8 verifier's argmax occasionally disagrees with the bf16 verifier the draft was trained against; in this run, spec_decode was already slower than baseline on bf16, so any FP8-induced acceptance drop is secondary to overall draft quality.
 
 ## 5. Execution note
 
