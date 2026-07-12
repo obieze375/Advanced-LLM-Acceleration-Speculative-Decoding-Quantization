@@ -65,7 +65,7 @@ if [ ! -f "${FP8}/config.json" ]; then
   source "${REPO_ROOT}/vllm_venv/bin/activate"
 fi
 
-COMMON=(--dataset-name hf --dataset-path philschmid/mt-bench --num-prompts 80 --max-concurrency 8 --enforce-eager)
+BENCH_COMMON=(--dataset-name hf --dataset-path philschmid/mt-bench --num-prompts 80 --max-concurrency 8)
 
 vllm_smoke_test () {
   echo "==> Smoke test: vllm serve (15s)..."
