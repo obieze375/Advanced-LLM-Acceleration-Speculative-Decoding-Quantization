@@ -43,16 +43,15 @@ prepare_data () {
 # ---------------------------------------------------------------------------
 launch_verifier () {
   source "${REPO_ROOT}/vllm_venv/bin/activate"
-  # Triton compile fix on Nebius CUDA 13 images: LD_LIBRARY_PATH must be
-  # directories (not the libcuda.so file path). VLLM_USE_V1=0 avoids torch
-  # inductor/triton compile failures during engine startup on fresh VMs.
-  export TRITON_LIBCUDA_PATH="/usr/local/cuda-13.0/targets/x86_64-linux/lib/stubs/libcuda.so"
+  # Nebius CUDA 13: never set TRITON_LIBCUDA_PATH (Triton passes it as a bad -L path).
+  # Run setup/03_fix_vllm_triton.sh once on a fresh VM.
+  unset TRITON_LIBCUDA_PATH
   export LD_LIBRARY_PATH="/usr/local/cuda-13.0/targets/x86_64-linux/lib/stubs:/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}"
   export VLLM_USE_V1=0
-  export VLLM_TORCH_COMPILE_LEVEL=0
+  export TORCH_COMPILE_DISABLE=1
   CUDA_VISIBLE_DEVICES=0 python scripts/launch_vllm.py \
     "${MODEL}" \
-    -- --port "${PORT}" --gpu-memory-utilization 0.85
+    -- --port "${PORT}" --gpu-memory-utilization 0.85 --enforce-eager
   # Single H100-80GB: no data/tensor parallelism needed for an 8B model.
   # Wait for "Application startup complete" before proceeding to Step 3.
 }
