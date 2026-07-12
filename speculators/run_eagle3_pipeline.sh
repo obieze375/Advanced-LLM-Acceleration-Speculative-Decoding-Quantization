@@ -43,6 +43,13 @@ prepare_data () {
 # ---------------------------------------------------------------------------
 launch_verifier () {
   source "${REPO_ROOT}/vllm_venv/bin/activate"
+  # Triton compile fix on Nebius CUDA 13 images: LD_LIBRARY_PATH must be
+  # directories (not the libcuda.so file path). VLLM_USE_V1=0 avoids torch
+  # inductor/triton compile failures during engine startup on fresh VMs.
+  export TRITON_LIBCUDA_PATH="/usr/local/cuda-13.0/targets/x86_64-linux/lib/stubs/libcuda.so"
+  export LD_LIBRARY_PATH="/usr/local/cuda-13.0/targets/x86_64-linux/lib/stubs:/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}"
+  export VLLM_USE_V1=0
+  export VLLM_TORCH_COMPILE_LEVEL=0
   CUDA_VISIBLE_DEVICES=0 python scripts/launch_vllm.py \
     "${MODEL}" \
     -- --port "${PORT}" --gpu-memory-utilization 0.85
