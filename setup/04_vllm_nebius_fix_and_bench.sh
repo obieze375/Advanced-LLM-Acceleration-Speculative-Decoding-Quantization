@@ -23,6 +23,8 @@ setup_env () {
   export TORCH_COMPILE_DISABLE=1
   unset VLLM_TORCH_COMPILE_LEVEL
   source "${REPO_ROOT}/vllm_venv/bin/activate"
+  # Required for `vllm bench serve` + HuggingFace datasets (mt-bench)
+  python -c "import datasets" 2>/dev/null || uv pip install -q datasets aiohttp
 }
 
 fix_triton () {
